@@ -110,10 +110,10 @@ const ASAFProgressIndicator = ({
               )}
             >
               {/* Phase icon */}
-              {complete ? (
-                <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
-              ) : current ? (
+              {current ? (
                 <Circle className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0 fill-current" />
+              ) : complete ? (
+                <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
               ) : (
                 <Circle className="w-4 h-4 text-gray-400 dark:text-gray-600 flex-shrink-0" />
               )}
@@ -121,10 +121,10 @@ const ASAFProgressIndicator = ({
               {/* Phase label */}
               <span className={cn(
                 'text-sm flex-1',
-                complete
-                  ? 'text-green-700 dark:text-green-300'
-                  : current
+                current
                   ? 'text-blue-700 dark:text-blue-300'
+                  : complete
+                  ? 'text-green-700 dark:text-green-300'
                   : 'text-gray-600 dark:text-gray-400'
               )}>
                 {phase.label}

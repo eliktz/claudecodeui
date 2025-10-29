@@ -181,13 +181,18 @@ const ASAFPanel = ({ selectedProject, className = '' }) => {
       >
         {/* Collapsed state (desktop only) */}
         {!isMobile && !isOpen && (
-          <button
-            onClick={togglePanel}
-            className="flex items-center justify-center w-full h-full hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-            title="Expand ASAF panel"
-          >
-            <ChevronLeft className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-          </button>
+          <div className="flex flex-col items-center py-4">
+            <button
+              onClick={togglePanel}
+              className="flex flex-col items-center justify-center gap-2 px-2 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded transition-colors group"
+              title="Expand ASAF panel"
+            >
+              <div className="w-8 h-8 rounded-md bg-gradient-to-br from-green-500 to-blue-500 flex items-center justify-center text-white font-bold text-sm shadow-sm">
+                A
+              </div>
+              <ChevronLeft className="w-3 h-3 text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors" />
+            </button>
+          </div>
         )}
 
         {/* Expanded state */}
@@ -239,11 +244,11 @@ const ASAFPanel = ({ selectedProject, className = '' }) => {
                     <ASAFProgressIndicator
                       currentPhase={sprintData.state?.phase}
                       phaseStates={{
-                        grooming: sprintData.state?.grooming_approved,
-                        planning: sprintData.state?.planning_complete,
-                        implementation: sprintData.state?.implementation_complete,
-                        demo: sprintData.state?.demo_complete,
-                        retrospective: sprintData.state?.retrospective_complete
+                        grooming_approved: sprintData.state?.grooming_approved,
+                        planning_complete: sprintData.state?.planning_complete,
+                        implementation_complete: sprintData.state?.implementation_complete,
+                        demo_complete: sprintData.state?.demo_complete,
+                        retrospective_complete: sprintData.state?.retrospective_complete
                       }}
                       hasGrooming={sprintData.hasGrooming}
                       hasPlanning={sprintData.hasPlanning}
