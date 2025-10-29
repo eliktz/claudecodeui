@@ -63,6 +63,14 @@ const ASAFPanel = ({ selectedProject, className = '' }) => {
   // Fetch sprint data and subscribe to WebSocket updates
   const { sprintData, isLoading, error, refreshData } = useASAFData(selectedProject);
 
+  // Track component mount/unmount
+  useEffect(() => {
+    console.log('[ASAFPanel] Component MOUNTED');
+    return () => {
+      console.log('[ASAFPanel] Component UNMOUNTING');
+    };
+  }, []);
+
   // Handle viewport resize
   useEffect(() => {
     const handleResize = () => {

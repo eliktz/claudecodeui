@@ -33,29 +33,55 @@ export function useASAFData(selectedProject) {
   // Abort controller for cancelling in-flight requests
   const abortControllerRef = useRef(null);
 
-  // Track the current project to detect changes
-  const currentProjectRef = useRef(selectedProject);
+  // Track the current project to detect changes (initialize as null, not selectedProject)
+  const currentProjectRef = useRef(null);
 
   // Track if we've fetched once (for WebSocket reconnect handling)
   const hasFetchedRef = useRef(false);
+
+  // Track the project path of the in-flight request
+  const inFlightProjectPathRef = useRef(null);
 
   /**
    * Fetch sprint data from API
    * Uses AbortController to cancel in-flight requests
    */
   const fetchSprintData = useCallback(async (project) => {
-    // Cancel any in-flight request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
     // No project selected
-    if (!project?.name) {
+    if (!project?.fullPath && !project?.path && !project?.name) {
       setSprintData(null);
       setIsLoading(false);
       setError(null);
       return;
     }
+
+    // Get the project path for this request
+    const newProjectPath = project.fullPath || project.path || project.name;
+
+    console.log('[useASAFData] fetchSprintData called:', {
+      newProjectPath,
+      inFlightPath: inFlightProjectPathRef.current,
+      hasAbortController: !!abortControllerRef.current
+    });
+
+    // If there's already a request in flight for the SAME project, don't abort it
+    if (inFlightProjectPathRef.current === newProjectPath) {
+      console.log('[useASAFData] Request already in flight for this project, skipping');
+      return;
+    }
+
+    // Cancel any in-flight request for a DIFFERENT project
+    if (abortControllerRef.current && inFlightProjectPathRef.current !== newProjectPath) {
+      console.log('[useASAFData] Aborting request for different project:', {
+        oldPath: inFlightProjectPathRef.current,
+        newPath: newProjectPath
+      });
+      abortControllerRef.current.abort();
+    }
+
+    // Track this request
+    inFlightProjectPathRef.current = newProjectPath;
+    console.log('[useASAFData] Starting new request for:', newProjectPath);
 
     // Create new abort controller for this request
     const abortController = new AbortController();
@@ -65,12 +91,28 @@ export function useASAFData(selectedProject) {
     setError(null);
 
     try {
+      // Use the correct path property
+      const rawPath = project.path || project.fullPath || project.name;
+
+      console.log('[useASAFData] Path resolution:', {
+        'project.path': project.path,
+        'project.fullPath': project.fullPath,
+        'project.name': project.name,
+        'rawPath': rawPath
+      });
+
       // Encode project path for URL (replace / with -)
-      const encodedPath = project.name.replace(/\//g, '-');
+      const encodedPath = rawPath.replace(/\//g, '-');
+
+      console.log('[useASAFData] Fetching:', {
+        encodedPath,
+        url: `/api/asaf/${encodedPath}`
+      });
 
       // Fetch sprint data
       const response = await fetch(`/api/asaf/${encodedPath}`, {
         signal: abortController.signal,
+        cache: 'no-store',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
         }
@@ -94,6 +136,8 @@ export function useASAFData(selectedProject) {
 
       const data = await response.json();
 
+      console.log('[useASAFData] Response:', data);
+
       // Check if request was aborted during JSON parsing
       if (abortController.signal.aborted) {
         return;
@@ -112,20 +156,28 @@ export function useASAFData(selectedProject) {
       hasFetchedRef.current = true;
 
     } catch (err) {
-      // Ignore abort errors
+      // Ignore abort errors - don't change state
       if (err.name === 'AbortError') {
+        console.log('[useASAFData] Request aborted, NOT changing state');
+        // Clean up refs but don't update state - let the new request handle it
+        if (abortControllerRef.current === abortController) {
+          abortControllerRef.current = null;
+          inFlightProjectPathRef.current = null;
+        }
         return;
       }
 
-      console.error('Error fetching ASAF data:', err);
+      console.error('[useASAFData] Error fetching ASAF data:', err);
       setError(err.message || 'Failed to load ASAF data');
       setSprintData(null);
 
     } finally {
-      // Clean up if this is still the current request
+      console.log('[useASAFData] Finally block, cleaning up');
+      // Clean up if this is still the current request (and wasn't aborted)
       if (abortControllerRef.current === abortController) {
         setIsLoading(false);
         abortControllerRef.current = null;
+        inFlightProjectPathRef.current = null;
       }
     }
   }, []);
@@ -142,12 +194,27 @@ export function useASAFData(selectedProject) {
 
   // Fetch data when project changes
   useEffect(() => {
-    // Detect project change
-    const projectChanged = currentProjectRef.current?.name !== selectedProject?.name;
+    console.log('[useASAFData] useEffect triggered:', {
+      selectedProject,
+      currentProject: currentProjectRef.current
+    });
 
-    if (projectChanged) {
-      currentProjectRef.current = selectedProject;
-      fetchSprintData(selectedProject);
+    // Always fetch if we have a project (handles initial mount)
+    if (selectedProject) {
+      // Detect project change (compare by fullPath, path, or name)
+      const projectChanged =
+        !currentProjectRef.current ||
+        currentProjectRef.current?.fullPath !== selectedProject?.fullPath ||
+        currentProjectRef.current?.path !== selectedProject?.path ||
+        currentProjectRef.current?.name !== selectedProject?.name;
+
+      console.log('[useASAFData] projectChanged:', projectChanged);
+
+      if (projectChanged) {
+        currentProjectRef.current = selectedProject;
+        console.log('[useASAFData] Calling fetchSprintData from PROJECT CHANGE');
+        fetchSprintData(selectedProject);
+      }
     }
   }, [selectedProject, fetchSprintData]);
 
@@ -155,7 +222,7 @@ export function useASAFData(selectedProject) {
   useEffect(() => {
     // Re-fetch data when WebSocket reconnects after we've fetched at least once
     if (isConnected && hasFetchedRef.current && selectedProject) {
-      console.log('WebSocket reconnected, refreshing ASAF data');
+      console.log('[useASAFData] Calling fetchSprintData from WEBSOCKET RECONNECTION');
       fetchSprintData(selectedProject);
     }
   }, [isConnected, selectedProject, fetchSprintData]);
@@ -173,10 +240,10 @@ export function useASAFData(selectedProject) {
     if (latestMessage?.type === 'asaf:updated') {
       // Normalize paths for comparison
       const messagePath = latestMessage.projectPath?.replace(/\\/g, '/');
-      const currentPath = selectedProject.path?.replace(/\\/g, '/');
+      const currentPath = (selectedProject.fullPath || selectedProject.path)?.replace(/\\/g, '/');
 
       if (messagePath === currentPath) {
-        console.log('ASAF update received for current project, refreshing');
+        console.log('[useASAFData] Calling fetchSprintData from WEBSOCKET MESSAGE');
         fetchSprintData(selectedProject);
       }
     }
@@ -186,6 +253,7 @@ export function useASAFData(selectedProject) {
   useEffect(() => {
     return () => {
       // Cancel any in-flight requests when component unmounts
+      console.log('[useASAFData] Component unmounting, aborting requests');
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }

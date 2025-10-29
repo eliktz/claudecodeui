@@ -34,6 +34,13 @@ router.get('/:projectPath', async (req, res) => {
   try {
     const { projectPath: encodedPath } = req.params;
 
+    console.log('[ASAF API] Request received:', {
+      encodedPath,
+      url: req.url,
+      originalUrl: req.originalUrl,
+      params: req.params
+    });
+
     if (!encodedPath) {
       return res.status(400).json({
         error: 'Project path is required'
@@ -68,19 +75,23 @@ router.get('/:projectPath', async (req, res) => {
     }
 
     // Additional security: Verify the project is in the user's project list
-    // This is implicitly done by extractProjectDirectory, but we can add extra validation
-    // by checking if the encoded path matches a known pattern
-    if (!encodedPath.startsWith('-') && !encodedPath.includes('-')) {
-      // Likely not a valid encoded project path
-      console.warn('Suspicious project path format:', encodedPath);
-    }
+    // This is implicitly done by extractProjectDirectory
+    // Note: Encoded paths don't necessarily start with '-' since we strip leading slashes
 
     // Read ASAF sprint data
     const sprintData = await readAsafSprintData(actualProjectPath);
 
+    console.log('[ASAF API] Sprint data read:', {
+      exists: sprintData.exists,
+      hasState: !!sprintData.state,
+      phase: sprintData.state?.phase,
+      status: sprintData.state?.status
+    });
+
     // Handle different response scenarios
     if (!sprintData.exists) {
       // No sprint exists or corrupted structure
+      console.log('[ASAF API] No sprint exists, returning false');
       return res.json({
         exists: false,
         error: sprintData.error
@@ -88,6 +99,7 @@ router.get('/:projectPath', async (req, res) => {
     }
 
     // Return sprint data
+    console.log('[ASAF API] Returning sprint data');
     res.json(sprintData);
 
   } catch (error) {

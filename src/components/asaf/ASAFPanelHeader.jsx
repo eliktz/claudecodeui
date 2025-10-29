@@ -52,6 +52,22 @@ const ASAFPanelHeader = ({ sprintName, phase, onToggle, isMobile, className = ''
     )}>
       {/* Sprint info */}
       <div className="flex-1 min-w-0 mr-2">
+        {/* ASAF label and Phase badge */}
+        <div className="flex items-center gap-2 mb-1">
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gradient-to-r from-green-500 to-blue-500 text-white shadow-sm">
+            ASAF
+          </span>
+          {/* Phase badge */}
+          {phase && (
+            <span className={cn(
+              'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border',
+              PHASE_COLORS[phase] || PHASE_COLORS.grooming
+            )}>
+              {formatPhase(phase)}
+            </span>
+          )}
+        </div>
+
         {/* Sprint name */}
         <h2
           className="text-sm font-semibold text-gray-900 dark:text-white truncate"
@@ -59,18 +75,6 @@ const ASAFPanelHeader = ({ sprintName, phase, onToggle, isMobile, className = ''
         >
           {sprintName || 'ASAF Sprint'}
         </h2>
-
-        {/* Phase badge */}
-        {phase && (
-          <div className="mt-1">
-            <span className={cn(
-              'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border',
-              PHASE_COLORS[phase] || PHASE_COLORS.grooming
-            )}>
-              {formatPhase(phase)}
-            </span>
-          </div>
-        )}
       </div>
 
       {/* Toggle button */}
