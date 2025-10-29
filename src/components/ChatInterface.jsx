@@ -24,6 +24,7 @@ import ClaudeLogo from './ClaudeLogo.jsx';
 import CursorLogo from './CursorLogo.jsx';
 import NextTaskBanner from './NextTaskBanner.jsx';
 import { useTasksSettings } from '../contexts/TasksSettingsContext';
+import ASAFPanel from './ASAFPanel';
 
 import ClaudeStatus from './ClaudeStatus';
 import { MicButton } from './MicButton.jsx';
@@ -2982,7 +2983,9 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
           }
         `}
       </style>
-      <div className="h-full flex flex-col">
+      <div className="h-full flex">
+        {/* Main Chat Content */}
+        <div className="flex-1 min-w-0 flex flex-col">
         {/* Messages Area - Scrollable Middle Section */}
       <div 
         ref={scrollContainerRef}
@@ -3477,6 +3480,9 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
           </div>
         </form>
       </div>
+        </div>
+        {/* ASAF Panel - Right Sidebar */}
+        <ASAFPanel selectedProject={selectedProject} />
     </div>
     </>
   );
