@@ -24,6 +24,7 @@ import TaskList from './TaskList';
 import TaskDetail from './TaskDetail';
 import PRDEditor from './PRDEditor';
 import Tooltip from './Tooltip';
+import ASAFPanel from './ASAFPanel';
 import { useTaskMaster } from '../contexts/TaskMasterContext';
 import { useTasksSettings } from '../contexts/TasksSettingsContext';
 import { api } from '../utils/api';
@@ -404,8 +405,10 @@ function MainContent({
         </div>
       </div>
 
-      {/* Content Area */}
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      {/* Content Area with ASAF Panel */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
+        {/* Tab Content Container */}
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <div className={`h-full ${activeTab === 'chat' ? 'block' : 'hidden'}`}>
           <ErrorBoundary showDetails={true}>
             <ChatInterface
@@ -503,6 +506,10 @@ function MainContent({
             onClearLogs={() => setServerLogs([])}
           /> */}
         </div>
+        </div>
+
+        {/* ASAF Panel - Shared across all tabs */}
+        <ASAFPanel selectedProject={selectedProject} />
       </div>
 
       {/* Code Editor Modal */}
