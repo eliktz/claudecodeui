@@ -15,6 +15,7 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import ASAFSprintSelector from './ASAFSprintSelector';
 
 /**
  * Phase color mapping for badges
@@ -42,9 +43,23 @@ const formatPhase = (phase) => {
  * @param {string} props.phase - Current phase of the sprint
  * @param {Function} props.onToggle - Callback for toggle button click
  * @param {boolean} props.isMobile - Whether in mobile view
+ * @param {Array} props.allSprints - List of all available sprints
+ * @param {Object} props.currentSelection - Current sprint selection info
+ * @param {Function} props.onSelectSprint - Callback when sprint is selected
+ * @param {boolean} props.isLoading - Whether data is loading
  * @param {string} props.className - Additional CSS classes
  */
-const ASAFPanelHeader = ({ sprintName, phase, onToggle, isMobile, className = '' }) => {
+const ASAFPanelHeader = ({
+  sprintName,
+  phase,
+  onToggle,
+  isMobile,
+  allSprints = [],
+  currentSelection,
+  onSelectSprint,
+  isLoading = false,
+  className = ''
+}) => {
   return (
     <div className={cn(
       'flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700',
@@ -76,6 +91,15 @@ const ASAFPanelHeader = ({ sprintName, phase, onToggle, isMobile, className = ''
           {sprintName || 'ASAF Sprint'}
         </h2>
       </div>
+
+      {/* Sprint selector */}
+      <ASAFSprintSelector
+        sprints={allSprints}
+        currentSelection={currentSelection}
+        onSelectSprint={onSelectSprint}
+        isLoading={isLoading}
+        className="flex-shrink-0 mr-2"
+      />
 
       {/* Toggle button */}
       <button

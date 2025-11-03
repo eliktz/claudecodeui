@@ -61,7 +61,15 @@ const ASAFPanel = ({ selectedProject, className = '' }) => {
   const prevSprintDataRef = useRef(null);
 
   // Fetch sprint data and subscribe to WebSocket updates
-  const { sprintData, isLoading, error, refreshData } = useASAFData(selectedProject);
+  const {
+    sprintData,
+    allSprints,
+    currentSelection,
+    isLoading,
+    error,
+    refreshData,
+    selectSprint
+  } = useASAFData(selectedProject);
 
   // Track component mount/unmount
   useEffect(() => {
@@ -139,6 +147,17 @@ const ASAFPanel = ({ selectedProject, className = '' }) => {
   const handleRefresh = () => {
     setShowUpdateNotification(false);
     refreshData();
+  };
+
+  // Handle sprint selection
+  const handleSelectSprint = async (sprintName) => {
+    try {
+      await selectSprint(selectedProject, sprintName);
+      console.log('[ASAFPanel] Sprint selected:', sprintName);
+    } catch (err) {
+      console.error('[ASAFPanel] Failed to select sprint:', err);
+      // Could show error notification here if needed
+    }
   };
 
   // Handle backdrop click (mobile only)
@@ -243,6 +262,10 @@ const ASAFPanel = ({ selectedProject, className = '' }) => {
                   phase={sprintData.state?.phase}
                   onToggle={togglePanel}
                   isMobile={isMobile}
+                  allSprints={allSprints}
+                  currentSelection={currentSelection}
+                  onSelectSprint={handleSelectSprint}
+                  isLoading={isLoading}
                 />
 
                 {/* Scrollable content */}

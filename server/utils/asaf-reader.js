@@ -4,6 +4,12 @@
  *
  * Utility module for reading and validating ASAF sprint data from the file system.
  * Handles edge cases including corrupted structure, missing files, and multiple sprints.
+ *
+ * Sprint Selection Support:
+ * - Reads `.current-sprint.json` as source of truth for selected sprint
+ * - Falls back to auto-selection (most recent by mtime) if selection missing
+ * - Creates `.current-sprint.json` on auto-selection
+ * - Handles corrupted files, deleted sprints, and missing data gracefully
  */
 
 import { promises as fs } from 'fs';
@@ -16,7 +22,130 @@ const VALID_PHASES = ['grooming', 'planning', 'implementation', 'demo', 'retrosp
 const VALID_STATUSES = ['ready', 'in-progress', 'complete', 'blocked'];
 
 /**
+ * Get current sprint selection from .current-sprint.json
+ * @param {string} projectPath - Absolute path to the project directory
+ * @returns {Object|null} Selection object or null if file doesn't exist/is invalid
+ */
+export async function getCurrentSprintSelection(projectPath) {
+  const selectionFile = path.join(projectPath, 'asaf', '.current-sprint.json');
+
+  try {
+    const content = await fs.readFile(selectionFile, 'utf8');
+    const selection = JSON.parse(content);
+
+    // Validate structure
+    if (!selection.sprint || !selection.selected_at || !selection.type) {
+      console.warn('[ASAF] Invalid .current-sprint.json structure:', selection);
+      return null;
+    }
+
+    return selection;
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      // File doesn't exist - no selection yet
+      return null;
+    }
+    if (error instanceof SyntaxError) {
+      console.error('[ASAF] Corrupted .current-sprint.json:', error.message);
+      return null;
+    }
+    // Re-throw unexpected errors (e.g., permission denied)
+    throw error;
+  }
+}
+
+/**
+ * Get all valid sprints in a project
+ * @param {string} projectPath - Absolute path to the project directory
+ * @returns {Array} Array of sprint metadata objects sorted by updated time (most recent first)
+ */
+export async function getAllSprints(projectPath) {
+  const asafDir = path.join(projectPath, 'asaf');
+
+  try {
+    const entries = await fs.readdir(asafDir, { withFileTypes: true });
+    const sprints = [];
+
+    for (const entry of entries) {
+      // Skip files, hidden files (except .current-sprint.json), and express directory
+      if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'express') {
+        continue;
+      }
+
+      const sprintPath = path.join(asafDir, entry.name);
+      const stateFile = path.join(sprintPath, '.state.json');
+
+      // Check if valid sprint (has .state.json)
+      try {
+        const stateContent = await fs.readFile(stateFile, 'utf8');
+        const state = JSON.parse(stateContent);
+
+        // Validate state structure
+        const validationError = validateStateJson(state);
+        if (validationError) {
+          console.log(`[ASAF] Skipping invalid sprint ${entry.name}: ${validationError}`);
+          continue;
+        }
+
+        // Get file modification time for sorting
+        const stats = await fs.stat(stateFile);
+
+        sprints.push({
+          name: entry.name,
+          phase: state.phase,
+          status: state.status,
+          type: state.type || 'full',
+          created: state.created || stats.birthtime.toISOString(),
+          updated: state.updated || stats.mtime.toISOString()
+        });
+      } catch (error) {
+        // Invalid sprint (missing/corrupted .state.json) - skip it
+        console.log(`[ASAF] Skipping invalid sprint ${entry.name}: ${error.message}`);
+      }
+    }
+
+    // Sort by updated time (most recent first)
+    sprints.sort((a, b) => new Date(b.updated) - new Date(a.updated));
+
+    return sprints;
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      // No asaf directory
+      return [];
+    }
+    console.error('[ASAF] Error reading sprints:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create or update .current-sprint.json
+ * @param {string} projectPath - Absolute path to the project directory
+ * @param {string} sprintName - Name of the sprint to select
+ * @param {string} type - Sprint type (default: 'full')
+ * @returns {void}
+ */
+export async function createCurrentSprintSelection(projectPath, sprintName, type = 'full') {
+  const selectionFile = path.join(projectPath, 'asaf', '.current-sprint.json');
+
+  const selection = {
+    sprint: sprintName,
+    selected_at: new Date().toISOString(),
+    type: type
+  };
+
+  try {
+    await fs.writeFile(selectionFile, JSON.stringify(selection, null, 2), 'utf8');
+    console.log(`[ASAF] Created sprint selection: ${sprintName}`);
+  } catch (error) {
+    console.error('[ASAF] Failed to write .current-sprint.json:', error);
+    throw error; // Critical error - should fail loudly
+  }
+}
+
+/**
  * Read and validate ASAF sprint data for a project
+ * NOW: Reads .current-sprint.json first, then falls back to auto-selection
  * @param {string} projectPath - Absolute path to the project directory
  * @returns {Object} Sprint data or error information
  */
@@ -24,7 +153,7 @@ export async function readAsafSprintData(projectPath) {
   try {
     const asafPath = path.join(projectPath, 'asaf');
 
-    // Check if asaf directory exists
+    // Step 1: Check if asaf directory exists
     try {
       const stats = await fs.stat(asafPath);
       if (!stats.isDirectory()) {
@@ -44,54 +173,84 @@ export async function readAsafSprintData(projectPath) {
       throw error;
     }
 
-    // List all directories in asaf folder
-    const entries = await fs.readdir(asafPath, { withFileTypes: true });
-    const sprintDirs = entries.filter(entry => entry.isDirectory());
+    // Step 2: Read current selection from .current-sprint.json
+    const selection = await getCurrentSprintSelection(projectPath);
 
-    if (sprintDirs.length === 0) {
-      return { exists: false };
-    }
-
-    // Get all valid sprints with their metadata
-    const sprints = [];
-
-    for (const dir of sprintDirs) {
-      const sprintPath = path.join(asafPath, dir.name);
-      const sprintData = await readSingleSprintData(sprintPath, dir.name);
+    // Step 3: If selection exists, try to use it
+    if (selection && selection.sprint) {
+      const selectedSprintPath = path.join(asafPath, selection.sprint);
+      const sprintData = await readSingleSprintData(selectedSprintPath, selection.sprint);
 
       if (sprintData.valid) {
-        sprints.push(sprintData);
+        // Selection is valid, return it
+        console.log(`[ASAF] Using selected sprint: ${selection.sprint}`);
+
+        // Get all sprints for metadata
+        const allSprints = await getAllSprints(projectPath);
+
+        return {
+          exists: true,
+          ...sprintData,
+          isSelected: true,
+          selectedAt: selection.selected_at,
+          totalSprints: allSprints.length,
+          allSprints: allSprints.length > 1 ? allSprints.map(s => ({
+            sprintName: s.name,
+            phase: s.phase,
+            status: s.status,
+            updated: s.updated
+          })) : undefined
+        };
       }
+
+      // Selection points to deleted/invalid sprint - fall through to auto-select
+      console.warn(`[ASAF] Selected sprint '${selection.sprint}' is invalid or deleted, auto-selecting...`);
     }
 
-    if (sprints.length === 0) {
+    // Step 4: No valid selection - get all sprints and auto-select
+    const allSprints = await getAllSprints(projectPath);
+
+    if (allSprints.length === 0) {
       return {
         exists: false,
-        error: 'No valid ASAF sprints found (corrupted structure)'
+        error: 'No valid ASAF sprints found'
       };
     }
 
-    // Return the most recently updated sprint
-    const mostRecentSprint = sprints.reduce((latest, current) => {
-      const latestTime = new Date(latest.state.updated).getTime();
-      const currentTime = new Date(current.state.updated).getTime();
-      return currentTime > latestTime ? current : latest;
-    });
+    // Step 5: Auto-select most recent sprint
+    const mostRecent = allSprints[0]; // Already sorted by updated time
+    console.log(`[ASAF] Auto-selecting sprint: ${mostRecent.name}`);
+
+    // Create .current-sprint.json for this auto-selection
+    await createCurrentSprintSelection(projectPath, mostRecent.name, mostRecent.type);
+
+    // Step 6: Read and return the auto-selected sprint
+    const selectedSprintPath = path.join(asafPath, mostRecent.name);
+    const sprintData = await readSingleSprintData(selectedSprintPath, mostRecent.name);
+
+    if (!sprintData.valid) {
+      return {
+        exists: false,
+        error: 'Auto-selected sprint is invalid'
+      };
+    }
 
     return {
       exists: true,
-      ...mostRecentSprint,
-      totalSprints: sprints.length,
-      allSprints: sprints.length > 1 ? sprints.map(s => ({
-        sprintName: s.sprintName,
-        phase: s.state.phase,
-        status: s.state.status,
-        updated: s.state.updated
+      ...sprintData,
+      isSelected: true,
+      isAutoSelected: true,
+      totalSprints: allSprints.length,
+      allSprints: allSprints.length > 1 ? allSprints.map(s => ({
+        sprintName: s.name,
+        phase: s.phase,
+        status: s.status,
+        updated: s.updated
       })) : undefined
     };
 
   } catch (error) {
-    console.error('Error reading ASAF sprint data:', error);
+    console.error('[ASAF] Error reading ASAF sprint data:', error);
 
     if (error.message.includes('Permission denied')) {
       throw error; // Re-throw permission errors

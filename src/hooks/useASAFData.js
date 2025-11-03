@@ -27,6 +27,10 @@ export function useASAFData(selectedProject) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Sprint selection state
+  const [allSprints, setAllSprints] = useState([]);
+  const [currentSelection, setCurrentSelection] = useState(null);
+
   // WebSocket context for real-time updates
   const { ws, isConnected, messages } = useWebSocketContext();
 
@@ -183,14 +187,128 @@ export function useASAFData(selectedProject) {
   }, []);
 
   /**
+   * Fetch current sprint selection
+   * Uses GET /api/asaf/:projectPath/current
+   */
+  const fetchCurrentSelection = useCallback(async (project) => {
+    if (!project?.fullPath && !project?.path && !project?.name) {
+      setCurrentSelection(null);
+      return;
+    }
+
+    try {
+      const rawPath = project.path || project.fullPath || project.name;
+      const encodedPath = rawPath.replace(/\//g, '-');
+
+      const response = await fetch(`/api/asaf/${encodedPath}/current`, {
+        cache: 'no-store',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        }
+      });
+
+      if (!response.ok) {
+        console.error('[useASAFData] Failed to fetch current selection:', response.status);
+        setCurrentSelection(null);
+        return;
+      }
+
+      const data = await response.json();
+      setCurrentSelection(data.selection || null);
+    } catch (err) {
+      console.error('[useASAFData] Error fetching current selection:', err);
+      setCurrentSelection(null);
+    }
+  }, []);
+
+  /**
+   * Fetch all available sprints
+   * Uses GET /api/asaf/:projectPath/list
+   */
+  const fetchAllSprints = useCallback(async (project) => {
+    if (!project?.fullPath && !project?.path && !project?.name) {
+      setAllSprints([]);
+      return;
+    }
+
+    try {
+      const rawPath = project.path || project.fullPath || project.name;
+      const encodedPath = rawPath.replace(/\//g, '-');
+
+      const response = await fetch(`/api/asaf/${encodedPath}/list`, {
+        cache: 'no-store',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        }
+      });
+
+      if (!response.ok) {
+        console.error('[useASAFData] Failed to fetch all sprints:', response.status);
+        setAllSprints([]);
+        return;
+      }
+
+      const data = await response.json();
+      setAllSprints(data.sprints || []);
+    } catch (err) {
+      console.error('[useASAFData] Error fetching all sprints:', err);
+      setAllSprints([]);
+    }
+  }, []);
+
+  /**
+   * Select a sprint
+   * Uses POST /api/asaf/:projectPath/select
+   * @param {Object} project - Project object
+   * @param {string} sprintName - Name of the sprint to select
+   */
+  const selectSprint = useCallback(async (project, sprintName) => {
+    if (!project?.fullPath && !project?.path && !project?.name) {
+      console.error('[useASAFData] Cannot select sprint: no project');
+      return;
+    }
+
+    try {
+      const rawPath = project.path || project.fullPath || project.name;
+      const encodedPath = rawPath.replace(/\//g, '-');
+
+      const response = await fetch(`/api/asaf/${encodedPath}/select`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        },
+        body: JSON.stringify({ sprintName })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to select sprint');
+      }
+
+      console.log('[useASAFData] Sprint selected:', sprintName);
+
+      // Refresh all data after selection
+      fetchSprintData(project);
+      fetchCurrentSelection(project);
+      fetchAllSprints(project);
+    } catch (err) {
+      console.error('[useASAFData] Error selecting sprint:', err);
+      throw err;
+    }
+  }, [fetchSprintData, fetchCurrentSelection, fetchAllSprints]);
+
+  /**
    * Manual refresh function
    * Can be called by components to retry after errors
    */
   const refreshData = useCallback(() => {
     if (selectedProject) {
       fetchSprintData(selectedProject);
+      fetchCurrentSelection(selectedProject);
+      fetchAllSprints(selectedProject);
     }
-  }, [selectedProject, fetchSprintData]);
+  }, [selectedProject, fetchSprintData, fetchCurrentSelection, fetchAllSprints]);
 
   // Fetch data when project changes
   useEffect(() => {
@@ -214,9 +332,11 @@ export function useASAFData(selectedProject) {
         currentProjectRef.current = selectedProject;
         console.log('[useASAFData] Calling fetchSprintData from PROJECT CHANGE');
         fetchSprintData(selectedProject);
+        fetchCurrentSelection(selectedProject);
+        fetchAllSprints(selectedProject);
       }
     }
-  }, [selectedProject, fetchSprintData]);
+  }, [selectedProject, fetchSprintData, fetchCurrentSelection, fetchAllSprints]);
 
   // Handle WebSocket reconnection
   useEffect(() => {
@@ -247,7 +367,20 @@ export function useASAFData(selectedProject) {
         fetchSprintData(selectedProject);
       }
     }
-  }, [messages, selectedProject, fetchSprintData]);
+
+    // Check if it's a sprint selection change for our current project
+    if (latestMessage?.type === 'asaf:sprint-selected') {
+      // Normalize paths for comparison
+      const messagePath = latestMessage.projectPath?.replace(/\\/g, '/');
+      const currentPath = (selectedProject.fullPath || selectedProject.path)?.replace(/\\/g, '/');
+
+      if (messagePath === currentPath) {
+        console.log('[useASAFData] Sprint selection changed via WebSocket, refreshing data');
+        fetchSprintData(selectedProject);
+        fetchCurrentSelection(selectedProject);
+      }
+    }
+  }, [messages, selectedProject, fetchSprintData, fetchCurrentSelection]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -262,9 +395,12 @@ export function useASAFData(selectedProject) {
 
   return {
     sprintData,
+    allSprints,
+    currentSelection,
     isLoading,
     error,
-    refreshData
+    refreshData,
+    selectSprint
   };
 }
 
