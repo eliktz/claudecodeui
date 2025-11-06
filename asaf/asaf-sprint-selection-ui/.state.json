@@ -1,0 +1,20 @@
+{
+  "sprint": "asaf-sprint-selection-ui",
+  "type": "full",
+  "phase": "implementation",
+  "status": "complete",
+  "created": "2025-11-03T00:50:00Z",
+  "updated": "2025-11-03T01:45:00Z",
+  "grooming_approved": true,
+  "grooming_locked": true,
+  "grooming_approved_at": "2025-11-03T01:00:00Z",
+  "grooming_completed_at": "2025-11-03T01:00:00Z",
+  "planning_complete": true,
+  "planning_completed_at": "2025-11-03T01:10:00Z",
+  "implementation_complete": true,
+  "implementation_started_at": "2025-11-03T01:10:00Z",
+  "implementation_completed_at": "2025-11-03T01:45:00Z",
+  "current_task": 8,
+  "total_tasks": 12,
+  "completed_tasks": [1, 2, 3, 4, 5, 6, 7, 8]
+}

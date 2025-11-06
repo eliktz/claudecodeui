@@ -24,7 +24,6 @@ import ClaudeLogo from './ClaudeLogo.jsx';
 import CursorLogo from './CursorLogo.jsx';
 import NextTaskBanner from './NextTaskBanner.jsx';
 import { useTasksSettings } from '../contexts/TasksSettingsContext';
-
 import ClaudeStatus from './ClaudeStatus';
 import { MicButton } from './MicButton.jsx';
 import { api, authenticatedFetch } from '../utils/api';

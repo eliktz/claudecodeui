@@ -46,8 +46,10 @@ import mcpRoutes from './routes/mcp.js';
 import cursorRoutes from './routes/cursor.js';
 import taskmasterRoutes from './routes/taskmaster.js';
 import mcpUtilsRoutes from './routes/mcp-utils.js';
+import asafRoutes from './routes/asaf.js';
 import { initializeDatabase } from './database/db.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
+import { addAsafWatcher, removeAsafWatcher, removeClientFromAllWatchers, cleanupAllAsafWatchers } from './utils/asaf-watcher.js';
 
 // File system watcher for projects folder
 let projectsWatcher = null;
@@ -192,6 +194,9 @@ app.use('/api/taskmaster', authenticateToken, taskmasterRoutes);
 // MCP utilities
 app.use('/api/mcp-utils', authenticateToken, mcpUtilsRoutes);
 
+// ASAF API Routes (protected)
+app.use('/api/asaf', authenticateToken, asafRoutes);
+
 // Static files served after API routes
 app.use(express.static(path.join(__dirname, '../dist')));
 
@@ -232,13 +237,13 @@ app.get('/api/projects/:projectName/sessions/:sessionId/messages', authenticateT
     try {
         const { projectName, sessionId } = req.params;
         const { limit, offset } = req.query;
-        
+
         // Parse limit and offset if provided
         const parsedLimit = limit ? parseInt(limit, 10) : null;
         const parsedOffset = offset ? parseInt(offset, 10) : 0;
-        
+
         const result = await getSessionMessages(projectName, sessionId, parsedLimit, parsedOffset);
-        
+
         // Handle both old and new response formats
         if (Array.isArray(result)) {
             // Backward compatibility: no pagination parameters were provided
@@ -303,32 +308,32 @@ app.post('/api/projects/create', authenticateToken, async (req, res) => {
 });
 
 // Browse filesystem endpoint for project suggestions - uses existing getFileTree
-app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {    
+app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {
     try {
         const { path: dirPath } = req.query;
-        
+
         // Default to home directory if no path provided
         const homeDir = os.homedir();
         let targetPath = dirPath ? dirPath.replace('~', homeDir) : homeDir;
-        
+
         // Resolve and normalize the path
         targetPath = path.resolve(targetPath);
-        
+
         // Security check - ensure path is accessible
         try {
             await fs.promises.access(targetPath);
             const stats = await fs.promises.stat(targetPath);
-            
+
             if (!stats.isDirectory()) {
                 return res.status(400).json({ error: 'Path is not a directory' });
             }
         } catch (err) {
             return res.status(404).json({ error: 'Directory not accessible' });
         }
-        
+
         // Use existing getFileTree function with shallow depth (only direct children)
         const fileTree = await getFileTree(targetPath, 1, 0, false); // maxDepth=1, showHidden=false
-        
+
         // Filter only directories and format for suggestions
         const directories = fileTree
             .filter(item => item.type === 'directory')
@@ -338,24 +343,24 @@ app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {
                 type: 'directory'
             }))
             .slice(0, 20); // Limit results
-            
+
         // Add common directories if browsing home directory
         const suggestions = [];
         if (targetPath === homeDir) {
             const commonDirs = ['Desktop', 'Documents', 'Projects', 'Development', 'Dev', 'Code', 'workspace'];
             const existingCommon = directories.filter(dir => commonDirs.includes(dir.name));
             const otherDirs = directories.filter(dir => !commonDirs.includes(dir.name));
-            
+
             suggestions.push(...existingCommon, ...otherDirs);
         } else {
             suggestions.push(...directories);
         }
-        
-        res.json({ 
+
+        res.json({
             path: targetPath,
-            suggestions: suggestions 
+            suggestions: suggestions
         });
-        
+
     } catch (error) {
         console.error('Error browsing filesystem:', error);
         res.status(500).json({ error: 'Failed to browse filesystem' });
@@ -542,24 +547,83 @@ function handleChatConnection(ws) {
     // Add to connected clients for project updates
     connectedClients.add(ws);
 
+    // Track current project for ASAF watcher
+    let currentProjectPath = null;
+
     ws.on('message', async (message) => {
         try {
             const data = JSON.parse(message);
 
-            if (data.type === 'claude-command') {
+            // Handle project context for ASAF watching
+            if (data.type === 'project-context') {
+                const newProjectPath = data.projectPath;
+
+                // Remove watcher from previous project if different
+                if (currentProjectPath && currentProjectPath !== newProjectPath) {
+                    removeAsafWatcher(currentProjectPath, ws);
+                }
+
+                // Add watcher for new project
+                if (newProjectPath) {
+                    // Extract actual project directory
+                    try {
+                        const actualPath = await extractProjectDirectory(newProjectPath);
+                        addAsafWatcher(actualPath, ws, wss);
+                        currentProjectPath = actualPath;
+                        console.log(`🎯 ASAF watcher: Project context set to ${actualPath}`);
+                    } catch (error) {
+                        console.error('Error setting ASAF watcher:', error);
+                    }
+                }
+            } else if (data.type === 'claude-command') {
                 console.log('💬 User message:', data.command || '[Continue/Resume]');
                 console.log('📁 Project:', data.options?.projectPath || 'Unknown');
                 console.log('🔄 Session:', data.options?.sessionId ? 'Resume' : 'New');
+
+                // Set up ASAF watcher for the project if not already set
+                if (data.options?.projectPath && data.options.projectPath !== currentProjectPath) {
+                    try {
+                        const actualPath = await extractProjectDirectory(data.options.projectPath);
+                        if (currentProjectPath && currentProjectPath !== actualPath) {
+                            removeAsafWatcher(currentProjectPath, ws);
+                        }
+                        addAsafWatcher(actualPath, ws, wss);
+                        currentProjectPath = actualPath;
+                    } catch (error) {
+                        console.error('Error setting ASAF watcher:', error);
+                    }
+                }
+
                 await spawnClaude(data.command, data.options, ws);
             } else if (data.type === 'cursor-command') {
                 console.log('🖱️ Cursor message:', data.command || '[Continue/Resume]');
                 console.log('📁 Project:', data.options?.cwd || 'Unknown');
                 console.log('🔄 Session:', data.options?.sessionId ? 'Resume' : 'New');
                 console.log('🤖 Model:', data.options?.model || 'default');
+
+                // Set up ASAF watcher for the project if not already set
+                if (data.options?.cwd && data.options.cwd !== currentProjectPath) {
+                    if (currentProjectPath && currentProjectPath !== data.options.cwd) {
+                        removeAsafWatcher(currentProjectPath, ws);
+                    }
+                    addAsafWatcher(data.options.cwd, ws, wss);
+                    currentProjectPath = data.options.cwd;
+                }
+
                 await spawnCursor(data.command, data.options, ws);
             } else if (data.type === 'cursor-resume') {
                 // Backward compatibility: treat as cursor-command with resume and no prompt
                 console.log('🖱️ Cursor resume session (compat):', data.sessionId);
+
+                // Set up ASAF watcher if cwd is provided
+                if (data.options?.cwd && data.options.cwd !== currentProjectPath) {
+                    if (currentProjectPath && currentProjectPath !== data.options.cwd) {
+                        removeAsafWatcher(currentProjectPath, ws);
+                    }
+                    addAsafWatcher(data.options.cwd, ws, wss);
+                    currentProjectPath = data.options.cwd;
+                }
+
                 await spawnCursor('', {
                     sessionId: data.sessionId,
                     resume: true,
@@ -568,7 +632,7 @@ function handleChatConnection(ws) {
             } else if (data.type === 'abort-session') {
                 console.log('🛑 Abort session request:', data.sessionId);
                 const provider = data.provider || 'claude';
-                const success = provider === 'cursor' 
+                const success = provider === 'cursor'
                     ? abortCursorSession(data.sessionId)
                     : abortClaudeSession(data.sessionId);
                 ws.send(JSON.stringify({
@@ -600,6 +664,9 @@ function handleChatConnection(ws) {
         console.log('🔌 Chat client disconnected');
         // Remove from connected clients
         connectedClients.delete(ws);
+
+        // Clean up ASAF watchers for this client
+        removeClientFromAllWatchers(ws);
     });
 }
 
@@ -1157,12 +1224,31 @@ async function startServer() {
             console.log(`Claude Code UI server running on http://0.0.0.0:${PORT}`);
 
             // Start watching the projects folder for changes
-            await setupProjectsWatcher(); 
+            await setupProjectsWatcher();
         });
     } catch (error) {
         console.error('❌ Failed to start server:', error);
         process.exit(1);
     }
 }
+
+// Cleanup on process termination
+process.on('SIGINT', () => {
+    console.log('\n🛑 Shutting down server...');
+    cleanupAllAsafWatchers();
+    if (projectsWatcher) {
+        projectsWatcher.close();
+    }
+    process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+    console.log('\n🛑 Shutting down server...');
+    cleanupAllAsafWatchers();
+    if (projectsWatcher) {
+        projectsWatcher.close();
+    }
+    process.exit(0);
+});
 
 startServer();
